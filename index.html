@@ -1,0 +1,101 @@
+<!doctype html>
+<html lang="zh-Hant">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>11XXXXX -HW10</title>
+  <link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+  <div class="app">
+    <header class="topbar">
+      <div class="title">
+        <h1>11XXXXX - HW10 黑白棋（Othello）</h1>
+        <div class="subtitle">玩家：黑棋先手　電腦：白棋後手</div>
+      </div>
+
+      <div class="controls">
+        <label class="ctl">
+          電腦棋力
+          <select id="difficulty">
+            <option value="basic">基本棋力</option>
+            <option value="advanced">進階棋力</option>
+          </select>
+        </label>
+
+        <label class="ctl">
+          動畫速度
+          <select id="speed">
+            <option value="fast">快</option>
+            <option value="normal" selected>中</option>
+            <option value="slow">慢</option>
+          </select>
+        </label>
+
+        <button id="restart" class="btn">重新開始</button>
+      </div>
+    </header>
+
+    <main class="main">
+      <section class="panel">
+        <div class="statusRow">
+          <div class="pill" id="turnPill">回合：—</div>
+          <div class="pill" id="statusPill">狀態：—</div>
+        </div>
+
+        <div class="scoreCard">
+          <div class="score">
+            <div class="label">黑棋（你）</div>
+            <div class="num" id="blackScore">2</div>
+          </div>
+          <div class="divider"></div>
+          <div class="score">
+            <div class="label">白棋（電腦）</div>
+            <div class="num" id="whiteScore">2</div>
+          </div>
+        </div>
+
+        <div class="hint">
+          提示：綠色圓點為合法落子。點格子下黑棋，電腦會自動下白棋。
+        </div>
+
+        <div class="mini">
+          <div class="miniTitle">快捷</div>
+          <div class="miniBtns">
+            <button id="toggleHints" class="btn ghost">顯示/隱藏合法步</button>
+            <button id="undo" class="btn ghost" title="可選加分：此版本先提供按鈕外觀，預設不啟用" disabled>悔棋(選配)</button>
+          </div>
+        </div>
+      </section>
+
+      <section class="boardWrap">
+        <div id="board" class="board" aria-label="Othello board"></div>
+
+        <div class="legend">
+          <div class="chip">
+            <span class="disc black tiny"></span>
+            <span>你：黑</span>
+          </div>
+          <div class="chip">
+            <span class="disc white tiny"></span>
+            <span>電腦：白</span>
+          </div>
+          <div class="chip">
+            <span class="dot"></span>
+            <span>合法落子</span>
+          </div>
+        </div>
+
+        <footer class="footer">
+          <div class="note">
+            作業格式（請到 README 放截圖＋連結）：<br/>
+            你只要把 GitHub Pages 連結與截圖貼上即可。
+          </div>
+        </footer>
+      </section>
+    </main>
+  </div>
+
+  <script src="./script.js"></script>
+</body>
+</html>

@@ -12,6 +12,7 @@
  *  - 立體棋子（CSS）
  *  - 翻棋動畫（rotateY）
  *  - 依序翻棋：逐顆延遲翻轉
+ *  - 悔棋：回到你上一手之前（通常回退兩手：電腦+你）
  */
 
 const SIZE = 8;
@@ -48,6 +49,7 @@ const difficultyEl = $('#difficulty');
 const speedEl = $('#speed');
 const restartBtn = $('#restart');
 const toggleHintsBtn = $('#toggleHints');
+const undoBtn = $('#undo');
 
 let board = [];
 let current = BLACK;         // 黑先手
@@ -56,13 +58,49 @@ let showHints = true;
 let lastMoveText = '';
 let aiThinking = false;
 
+// ===== 悔棋：歷史堆疊（儲存「回合邊界」狀態）=====
+let history = []; // 每筆：{ board, current, lastMoveText }
+
+function snapshot(){
+  return {
+    board: board.map(row => row.slice()),
+    current,
+    lastMoveText
+  };
+}
+function restoreFrom(state){
+  board = state.board.map(row => row.slice());
+  current = state.current;
+  lastMoveText = '已悔棋';
+  aiThinking = false;
+  inputLocked = false;
+}
+function saveState(){
+  // 避免連續重複存同一盤（簡單比對：只比對 current + 棋盤字串）
+  const key = `${current}|` + board.map(r => r.join(',')).join('|');
+  const last = history.length ? history[history.length - 1]._key : null;
+  if (last === key) return;
+  const s = snapshot();
+  s._key = key;
+  history.push(s);
+  // 控制容量（避免太大）
+  if (history.length > 200) history.shift();
+}
+function canUndo(){
+  // 只允許：你回合 & 不在動畫/思考中 & 至少有前一狀態
+  return !inputLocked && !aiThinking && current === BLACK && history.length > 1;
+}
+function updateUndoButton(){
+  if (!undoBtn) return;
+  undoBtn.disabled = !canUndo();
+}
+
 // ===== 強化進階 AI：Zobrist + Transposition Table =====
 let ZOBRIST = null;
 let TT = new Map(); // key: BigInt hash -> entry
 const TT_FLAG = { EXACT: 0, LOWER: 1, UPPER: 2 };
 
 function rand64(seedObj){
-  // xorshift64* (BigInt)
   let x = seedObj.x;
   x ^= (x << 13n);
   x ^= (x >> 7n);
@@ -114,10 +152,12 @@ function initBoard(){
   inputLocked = false;
   aiThinking = false;
   lastMoveText = '';
+
+  history = [];
+  saveState(); // 初始狀態存起來
 }
 
 function inBounds(r,c){ return r>=0 && r<SIZE && c>=0 && c<SIZE; }
-
 function cloneBoard(b){ return b.map(row => row.slice()); }
 
 function countPieces(b){
@@ -171,6 +211,8 @@ function setStatus(){
   const diffName = difficultyEl.value === 'basic' ? '基本棋力' : '進階棋力';
   const thinking = aiThinking ? '（電腦思考中…）' : '';
   statusPill.textContent = `狀態：${diffName}${thinking} ${lastMoveText ? '｜' + lastMoveText : ''}`.trim();
+
+  updateUndoButton();
 }
 
 function render(){
@@ -215,6 +257,7 @@ function sleep(ms){ return new Promise(res => setTimeout(res, ms)); }
 async function applyMoveAnimated(r,c,color,flips){
   const { flipDelay, animMs } = speedConfig();
   inputLocked = true;
+  updateUndoButton();
 
   // 落子
   board[r][c] = color;
@@ -238,6 +281,7 @@ async function applyMoveAnimated(r,c,color,flips){
   }
 
   inputLocked = false;
+  updateUndoButton();
   render();
 }
 
@@ -262,7 +306,10 @@ async function passTurnIfNoMoves(){
   if (moves.length===0){
     lastMoveText = (current===BLACK ? '黑棋' : '白棋') + '無合法步，PASS';
     current = -current;
+
+    saveState(); // PASS 也是回合邊界，存起來
     render();
+
     await sleep(180);
     return true;
   }
@@ -281,6 +328,7 @@ async function onCellClick(r,c){
   if (gameOverIfNeeded()) return;
 
   current = WHITE;
+  saveState(); // 你下完、輪到電腦：存回合邊界
   render();
 
   await passTurnIfNoMoves();
@@ -292,7 +340,6 @@ async function onCellClick(r,c){
 }
 
 function pickBasicMove(moves){
-  // 基本棋力：吃最多（同分隨機）
   let best = -Infinity;
   let pool = [];
   for (const m of moves){
@@ -316,7 +363,7 @@ function applyMoveNoAnim(b, move, color){
   return nb;
 }
 
-// ===== 更強的評分函式（白棋有利為正分）=====
+// ===== 更強評分（白棋有利為正分）=====
 function evaluateBoard(b){
   let pos = 0;
   let discDiff = 0; // white - black
@@ -331,12 +378,10 @@ function evaluateBoard(b){
     }
   }
 
-  // 機動性
   const mW = getValidMoves(b, WHITE).length;
   const mB = getValidMoves(b, BLACK).length;
   const mobility = 10 * (mW - mB);
 
-  // 前線子（frontier）
   let fW = 0, fB = 0;
   for (let r=0;r<SIZE;r++){
     for (let c=0;c<SIZE;c++){
@@ -355,7 +400,6 @@ function evaluateBoard(b){
   }
   const frontierScore = -6 * (fW - fB);
 
-  // 角落
   const corners = [[0,0],[0,7],[7,0],[7,7]];
   let cornerScore = 0;
   for (const [r,c] of corners){
@@ -363,7 +407,6 @@ function evaluateBoard(b){
     else if (b[r][c]===BLACK) cornerScore -= 120;
   }
 
-  // X / C square 懲罰（角落空時）
   const xSquares = [[1,1],[1,6],[6,1],[6,6]];
   const cSquares = [[0,1],[1,0],[0,6],[1,7],[6,0],[7,1],[6,7],[7,6]];
   let xs = 0, cs = 0;
@@ -399,7 +442,6 @@ function evaluateBoard(b){
     else if (b[r][c]===BLACK) cs += 30;
   }
 
-  // 終局越近：子數差越重要
   const discWeight = (empty <= 16) ? 14 : (empty <= 28 ? 6 : 2);
   const discScore = discWeight * discDiff;
 
@@ -412,7 +454,6 @@ function terminalScore(b){
 }
 
 function orderMoves(moves){
-  // 角落優先、位置權重高優先、翻子多優先
   return moves.slice().sort((a,b)=>{
     const ac = (a.r===0||a.r===7)&&(a.c===0||a.c===7);
     const bc = (b.r===0||b.r===7)&&(b.c===0||b.c===7);
@@ -438,7 +479,6 @@ function minimaxTT(b, color, depth, alpha, beta, deadline){
     return { score: evaluateBoard(b), move: null, aborted: false };
   }
 
-  // PASS
   if (moves.length === 0){
     return minimaxTT(b, -color, depth-1, alpha, beta, deadline);
   }
@@ -477,7 +517,6 @@ function minimaxTT(b, color, depth, alpha, beta, deadline){
     if (beta <= alpha) break;
   }
 
-  // TT flag：用原始窗判定
   let flag = TT_FLAG.EXACT;
   if (bestScore <= alphaOrig) flag = TT_FLAG.UPPER;
   else if (bestScore >= betaOrig) flag = TT_FLAG.LOWER;
@@ -493,6 +532,7 @@ async function computerMove(){
 
   const { aiDelay } = speedConfig();
   aiThinking = true;
+  updateUndoButton();
   render();
   inputLocked = true;
 
@@ -504,7 +544,10 @@ async function computerMove(){
     inputLocked = false;
     lastMoveText = '白棋無合法步，PASS';
     current = BLACK;
+
+    saveState();
     render();
+
     await passTurnIfNoMoves();
     return;
   }
@@ -514,25 +557,21 @@ async function computerMove(){
   if (difficultyEl.value === 'basic'){
     chosen = pickBasicMove(moves);
   } else {
-    // ===== 進階：Iterative deepening + TT + 終局加深 =====
     TT.clear();
 
     const {black, white} = countPieces(board);
     const filled = black + white;
     const empty = 64 - filled;
 
-    // 時間預算（速度越慢越久，搜尋越深）
     const s = speedEl.value;
     const budget = (s === 'fast') ? 420 : (s === 'slow' ? 1150 : 750);
     const deadline = performance.now() + budget;
 
-    // 最大深度：中盤 7，終局可到 9（更強）
     let maxDepth = 7;
     if (empty <= 18) maxDepth = 8;
     if (empty <= 12) maxDepth = 9;
 
     let bestSoFar = null;
-
     for (let d = 2; d <= maxDepth; d++){
       const res = minimaxTT(board, WHITE, d, -Infinity, Infinity, deadline);
       if (res.aborted) break;
@@ -551,6 +590,8 @@ async function computerMove(){
   if (gameOverIfNeeded()) return;
 
   current = BLACK;
+
+  saveState(); // 電腦下完、輪到你：存回合邊界
   render();
 
   await passTurnIfNoMoves();
@@ -558,6 +599,24 @@ async function computerMove(){
   if (current === WHITE){
     await computerMove();
   }
+}
+
+// ===== 悔棋（Undo）：回到你上一手之前 =====
+function undoMove(){
+  if (!canUndo()) return;
+
+  // 目前一定是你回合（BLACK），先丟掉「現在」狀態
+  history.pop();
+  if (history.length === 0) return;
+
+  // 目標：回到「你回合」的狀態（通常會再 pop 一次，把你上一手後的電腦回合也跳過）
+  while (history.length > 1 && history[history.length - 1].current !== BLACK){
+    history.pop();
+  }
+
+  const state = history[history.length - 1];
+  restoreFrom(state);
+  render();
 }
 
 function wireUI(){
@@ -577,6 +636,10 @@ function wireUI(){
     showHints = !showHints;
     render();
   });
+
+  if (undoBtn){
+    undoBtn.addEventListener('click', () => undoMove());
+  }
 }
 
 function start(){
